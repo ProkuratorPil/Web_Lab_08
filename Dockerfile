@@ -1,17 +1,11 @@
-# Берём официальный образ Python версии 3.11 (упрощённая версия)
-FROM python:3.11-slim
+FROM python:3.12-bookworm
 
-# Устанавливаем рабочую директорию внутри контейнера
 WORKDIR /app
 
-# Копируем файл с зависимостями в контейнер
 COPY requirements.txt .
+RUN pip install --default-timeout=100 --retries 5 --no-cache-dir -r requirements.txt
 
-# Устанавливаем зависимости внутри контейнера
-RUN pip install --no-cache-dir -r requirements.txt
+COPY web_lab1 .
 
-# Копируем весь остальной код проекта в контейнер
-COPY . .
-
-# Команда, которая запустится при старте контейнера
+# Пропускаем alembic - используем init.sql для создания таблиц
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "4200"]

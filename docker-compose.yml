@@ -1,7 +1,56 @@
-version: '3.8'
-
 services:
+  postgres:
+    image: postgres:16
+    container_name: wp_labs_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-student}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-student_secure_password}
+      POSTGRES_DB: ${DB_NAME:-wp_labs}
+    ports:
+      - "5432:5432"
+    volumes:
+      - wp_labs_postgres:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - wp_labs_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-student} -d ${DB_NAME:-wp_labs}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   app:
-    build: .
+    build: web_lab1
+    container_name: wp_labs_app
+    restart: unless-stopped
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-student}
+      DB_PASSWORD: ${DB_PASSWORD:-student_secure_password}
+      DB_NAME: ${DB_NAME:-wp_labs}
+      PORT: 4200
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-super_secret_access_key_change_in_prod}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-super_secret_refresh_key_change_in_prod}
+      JWT_ACCESS_EXPIRATION: ${JWT_ACCESS_EXPIRATION:-15m}
+      JWT_REFRESH_EXPIRATION: ${JWT_REFRESH_EXPIRATION:-7d}
+      YANDEX_CLIENT_ID: ${YANDEX_CLIENT_ID:-}
+      YANDEX_CLIENT_SECRET: ${YANDEX_CLIENT_SECRET:-}
+      YANDEX_CALLBACK_URL: ${YANDEX_CALLBACK_URL:-http://localhost:4200/auth/oauth/yandex/callback}
+      VK_CLIENT_ID: ${VK_CLIENT_ID:-}
+      VK_CLIENT_SECRET: ${VK_CLIENT_SECRET:-}
+      VK_CALLBACK_URL: ${VK_CALLBACK_URL:-http://localhost:4200/auth/oauth/vk/callback}
     ports:
       - "4200:4200"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - wp_labs_network
+
+volumes:
+  wp_labs_postgres:
+
+networks:
+  wp_labs_network:
