@@ -17,34 +17,45 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Определяем окружение
+IS_PRODUCTION = os.getenv('NODE_ENV') == 'production'
+
+# В production отключаем документацию
 app = FastAPI(
-    title="User & File Management API",
-    description="API для управления пользователями и файлами с JWT аутентификацией",
-    version="2.0.0"
+    title="Lab Project API",
+    description="Документация API для лабораторных работ №2-№4",
+    version="1.0",
+    docs_url=None if IS_PRODUCTION else "/docs",
+    redoc_url=None if IS_PRODUCTION else "/redoc",
+    openapi_url=None if IS_PRODUCTION else "/openapi.json",
 )
 
-# OpenAPI документация (только в development режиме)
-if os.getenv('NODE_ENV') != 'production':
+# Кастомная OpenAPI схема с настройками безопасности (только в dev)
+if not IS_PRODUCTION:
     def custom_openapi():
         if app.openapi_schema:
             return app.openapi_schema
         openapi_schema = get_openapi(
-            title="User & File Management API",
-            version="2.0.0",
-            description="Документация API для управления пользователями и файлами с JWT аутентификацией",
+            title="Lab Project API",
+            version="1.0",
+            description="Документация API для лабораторных работ №2-№4",
             routes=app.routes,
         )
-        openapi_schema["info"]["x-logo"] = {
-            "url": "https://fastapi.tiangolo.com/img/logo-margin/logo-teal.png"
-        }
         if "components" not in openapi_schema:
             openapi_schema["components"] = {}
-        
+
         openapi_schema["components"]["securitySchemes"] = {
             "bearerAuth": {
                 "type": "http",
                 "scheme": "bearer",
-                "bearerFormat": "JWT"
+                "bearerFormat": "JWT",
+                "description": "JWT токен, получаемый после авторизации. Также поддерживается передача через Cookie."
+            },
+            "cookieAuth": {
+                "type": "apiKey",
+                "in": "cookie",
+                "name": "access_token",
+                "description": "JWT токен доступа, хранящийся в HttpOnly cookie"
             },
             "oauth2": {
                 "type": "oauth2",
@@ -53,17 +64,14 @@ if os.getenv('NODE_ENV') != 'production':
                         "authorizationUrl": "https://oauth.yandex.ru/authorize",
                         "tokenUrl": "https://oauth.yandex.ru/token",
                         "scopes": {
-                            "email": "Access to user's email",
-                            "openid": "Access to user's profile"
+                            "login:email": "Доступ к email пользователя",
+                            "login:info": "Доступ к информации о профиле"
                         }
                     }
-                }
+                },
+                "description": "OAuth 2.0 авторизация через Яндекс"
             }
         }
-        openapi_schema["security"] = [
-            {"bearerAuth": {}},
-            {"oauth2": ["email", "openid"]}
-        ]
         app.openapi_schema = openapi_schema
         return app.openapi_schema
 
@@ -105,12 +113,12 @@ app.include_router(user_router.router)
 app.include_router(file_router.router)
 
 
-@app.get("/")
+@app.get("/", tags=["System"])
 def read_root():
-    return {"message": "Welcome to the User & File Management API"}
+    return {"message": "Welcome to the Lab Project API"}
 
 
-@app.get("/health")
+@app.get("/health", tags=["System"], summary="Проверка работоспособности")
 def health_check():
     """Healthcheck endpoint."""
     return {"status": "healthy"}

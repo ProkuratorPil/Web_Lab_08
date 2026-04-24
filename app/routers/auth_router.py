@@ -1,7 +1,7 @@
 """
 Роутер аутентификации и авторизации.
 """
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status, Response, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy.orm import Session
@@ -12,28 +12,29 @@ from app.core.database import get_db
 from app.core.jwt import create_tokens, jwt_manager, verify_refresh
 from app.core.security import hash_password, verify_password, hash_token
 from app.core.dependencies import (
-    get_current_user, 
+    get_current_user,
     validate_refresh_token,
     get_client_ip,
     get_user_agent
 )
 from app.core.oauth.providers import OAuthProviderFactory, get_oauth_user_info
 from app.schemas.auth import (
-    UserRegister, 
-    UserLogin, 
-    UserResponse, 
+    UserRegister,
+    UserLogin,
+    UserResponse,
     UserProfile,
     TokenResponse,
     ForgotPasswordRequest,
     ResetPasswordRequest,
     MessageResponse
 )
+from app.schemas.common import get_auth_responses
 from app.models.user import User
 from app.models.token import TokenType
 from app.crud.token_crud import create_token, revoke_token, revoke_all_user_tokens, get_token_by_hash
 
 
-router = APIRouter(prefix="/auth", tags=["auth"])
+router = APIRouter(prefix="/auth", tags=["Auth"])
 
 
 oauth_states = {}
@@ -79,18 +80,28 @@ def _save_tokens(db: Session, user_id, tokens: dict, ip: str, ua: str):
     )
 
 
-@router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/register",
+    response_model=UserResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Регистрация нового пользователя",
+    description="Создаёт нового пользователя с указанными данными. Возвращает данные созданного пользователя без токенов.",
+    response_description="Данные созданного пользователя",
+    responses={
+        **get_auth_responses(400, 422),
+    }
+)
 async def register(user_data: UserRegister, db: Session = Depends(get_db)):
     existing = db.query(User).filter(User.email == user_data.email, User.deleted_at.is_(None)).first()
     if existing:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Пользователь с таким email уже существует")
-    
+
     existing = db.query(User).filter(User.username == user_data.username.lower(), User.deleted_at.is_(None)).first()
     if existing:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Пользователь с таким username уже существует")
-    
+
     hashed_password, salt = hash_password(user_data.password)
-    
+
     user = User(
         username=user_data.username.lower(),
         email=user_data.email.lower(),
@@ -99,37 +110,55 @@ async def register(user_data: UserRegister, db: Session = Depends(get_db)):
         phone=user_data.phone,
         is_verified=False,
     )
-    
+
     db.add(user)
     db.commit()
     db.refresh(user)
-    
+
     return UserResponse(
         id=user.id, username=user.username, email=user.email, phone=user.phone,
         is_verified=user.is_verified, is_oauth_user=False, created_at=user.created_at
     )
 
 
-@router.post("/login", response_model=TokenResponse)
+@router.post(
+    "/login",
+    response_model=TokenResponse,
+    summary="Авторизация пользователя",
+    description="Авторизует пользователя по email и паролю. Устанавливает HttpOnly cookies с токенами.",
+    response_description="JWT токены доступа и обновления",
+    responses={
+        **get_auth_responses(400, 401, 422),
+    }
+)
 async def login(response: Response, request: Request, user_data: UserLogin, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == user_data.email.lower(), User.deleted_at.is_(None)).first()
-    
+
     if not user or not user.hashed_password or not verify_password(user_data.password, user.hashed_password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Неверный email или пароль")
-    
+
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Аккаунт деактивирован")
-    
+
     tokens = create_tokens(user.id)
     ip = get_client_ip(request)
     ua = get_user_agent(request)
     _save_tokens(db, user.id, tokens, ip, ua)
-    
+
     set_auth_cookies(response, tokens["access_token"], tokens["refresh_token"], tokens["access_expires_at"], tokens["refresh_expires_at"])
     return TokenResponse(**tokens)
 
 
-@router.post("/refresh", response_model=TokenResponse)
+@router.post(
+    "/refresh",
+    response_model=TokenResponse,
+    summary="Обновление токенов",
+    description="Обновляет access и refresh токены по действующему refresh токену из cookie.",
+    response_description="Новая пара JWT токенов",
+    responses={
+        **get_auth_responses(401),
+    }
+)
 async def refresh_tokens(response: Response, request: Request, result: tuple = Depends(validate_refresh_token), db: Session = Depends(get_db)):
     user, old_refresh_token = result
     old_token_hash = hash_token(old_refresh_token)
@@ -137,17 +166,27 @@ async def refresh_tokens(response: Response, request: Request, result: tuple = D
     ip = get_client_ip(request)
     ua = get_user_agent(request)
     _save_tokens(db, user.id, tokens, ip, ua)
-    
+
     old_token = get_token_by_hash(db, old_token_hash)
     if old_token:
         old_token.is_revoked = True
         db.commit()
-    
+
     set_auth_cookies(response, tokens["access_token"], tokens["refresh_token"], tokens["access_expires_at"], tokens["refresh_expires_at"])
     return TokenResponse(**tokens)
 
 
-@router.get("/whoami", response_model=UserProfile)
+@router.get(
+    "/whoami",
+    response_model=UserProfile,
+    summary="Информация о текущем пользователе",
+    description="Возвращает профиль авторизованного пользователя.",
+    response_description="Данные профиля пользователя",
+    responses={
+        **get_auth_responses(401),
+    },
+    openapi_extra={"security": [{"bearerAuth": []}, {"cookieAuth": []}]}
+)
 async def whoami(current_user: User = Depends(get_current_user)):
     return UserProfile(
         id=current_user.id, username=current_user.username, email=current_user.email, phone=current_user.phone,
@@ -156,7 +195,17 @@ async def whoami(current_user: User = Depends(get_current_user)):
     )
 
 
-@router.post("/logout", response_model=MessageResponse)
+@router.post(
+    "/logout",
+    response_model=MessageResponse,
+    summary="Выход из системы",
+    description="Завершает текущую сессию: отзывает refresh токен и очищает cookies.",
+    response_description="Подтверждение выхода",
+    responses={
+        **get_auth_responses(401),
+    },
+    openapi_extra={"security": [{"bearerAuth": []}, {"cookieAuth": []}]}
+)
 async def logout(response: Response, request: Request, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     refresh_token = request.cookies.get("refresh_token")
     if refresh_token:
@@ -169,14 +218,32 @@ async def logout(response: Response, request: Request, current_user: User = Depe
     return MessageResponse(message="Сессия завершена")
 
 
-@router.post("/logout-all", response_model=MessageResponse)
+@router.post(
+    "/logout-all",
+    response_model=MessageResponse,
+    summary="Выход из всех сессий",
+    description="Отзывает все токены пользователя и очищает cookies.",
+    response_description="Подтверждение отзыва всех сессий",
+    responses={
+        **get_auth_responses(401),
+    },
+    openapi_extra={"security": [{"bearerAuth": []}, {"cookieAuth": []}]}
+)
 async def logout_all(response: Response, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     count = revoke_all_user_tokens(db, current_user.id)
     clear_auth_cookies(response)
     return MessageResponse(message="Все сессии завершены", detail=f"Отозвано токенов: {count}")
 
 
-@router.get("/oauth/{provider}")
+@router.get(
+    "/oauth/{provider}",
+    summary="Инициализация OAuth авторизации",
+    description="Перенаправляет пользователя на страницу авторизации выбранного OAuth провайдера (yandex или vk).",
+    response_description="Редирект на страницу авторизации провайдера",
+    responses={
+        **get_auth_responses(400),
+    }
+)
 async def oauth_init(provider: str):
     provider_name = provider.lower()
     oauth_provider = OAuthProviderFactory.get_provider(provider_name)
@@ -187,7 +254,15 @@ async def oauth_init(provider: str):
     return RedirectResponse(url=oauth_provider.get_authorization_url(state))
 
 
-@router.get("/oauth/{provider}/callback")
+@router.get(
+    "/oauth/{provider}/callback",
+    summary="Callback OAuth авторизации",
+    description="Обрабатывает ответ от OAuth провайдера после успешной авторизации. Создаёт или обновляет пользователя и устанавливает токены в cookies.",
+    response_description="Редирект на главную страницу",
+    responses={
+        **get_auth_responses(400),
+    }
+)
 async def oauth_callback(provider: str, code: str, state: str, response: Response, request: Request, db: Session = Depends(get_db)):
     provider_name = provider.lower()
     if state not in oauth_states or oauth_states[state] != provider_name:
@@ -221,11 +296,29 @@ async def oauth_callback(provider: str, code: str, state: str, response: Respons
     return RedirectResponse(url="/", status_code=status.HTTP_302_FOUND)
 
 
-@router.post("/forgot-password", response_model=MessageResponse)
+@router.post(
+    "/forgot-password",
+    response_model=MessageResponse,
+    summary="Запрос сброса пароля",
+    description="Отправляет инструкцию по сбросу пароля на указанный email (заглушка).",
+    response_description="Подтверждение отправки",
+    responses={
+        **get_auth_responses(422),
+    }
+)
 async def forgot_password(data: ForgotPasswordRequest, db: Session = Depends(get_db)):
     return MessageResponse(message="Если аккаунт существует, на email отправлена инструкция по сбросу пароля")
 
 
-@router.post("/reset-password", response_model=MessageResponse)
+@router.post(
+    "/reset-password",
+    response_model=MessageResponse,
+    summary="Сброс пароля",
+    description="Устанавливает новый пароль по токену сброса (заглушка).",
+    response_description="Подтверждение изменения пароля",
+    responses={
+        **get_auth_responses(400, 422),
+    }
+)
 async def reset_password(data: ResetPasswordRequest, db: Session = Depends(get_db)):
     return MessageResponse(message="Пароль успешно изменён")

@@ -31,6 +31,7 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:-student_secure_password}
       DB_NAME: ${DB_NAME:-wp_labs}
       PORT: 4200
+      NODE_ENV: ${NODE_ENV:-development}
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-super_secret_access_key_change_in_prod}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-super_secret_refresh_key_change_in_prod}
       JWT_ACCESS_EXPIRATION: ${JWT_ACCESS_EXPIRATION:-15m}

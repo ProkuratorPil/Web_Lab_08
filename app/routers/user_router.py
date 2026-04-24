@@ -7,16 +7,11 @@ from app.core.dependencies import get_current_user
 from app.models.user import User
 from app.services.user_service import UserService
 from app.schemas.user import UserCreate, UserUpdate, UserResponse, PaginationParams, PaginatedResponse
+from app.schemas.common import get_auth_responses
 
 router = APIRouter(
     prefix="/users",
-    tags=["users"],
-    responses={
-        401: {"description": "Необходима аутентификация"},
-        403: {"description": "Недостаточно прав"},
-        404: {"description": "Пользователь не найден"},
-        500: {"description": "Внутренняя ошибка сервера"}
-    }
+    tags=["Users"],
 )
 
 
@@ -28,8 +23,7 @@ router = APIRouter(
     description="Создает нового пользователя с указанными данными. Пользователь создается неактивированным.",
     response_description="Данные созданного пользователя",
     responses={
-        400: {"description": "Ошибка валидации данных"},
-        422: {"description": "Некорректные данные в запросе"}
+        **get_auth_responses(400, 422),
     }
 )
 def create_user(user_data: UserCreate, db: Session = Depends(get_db)):
@@ -46,13 +40,17 @@ def create_user(user_data: UserCreate, db: Session = Depends(get_db)):
     "/",
     response_model=PaginatedResponse,
     summary="Получение списка пользователей",
-    description="Возвращает пагинированный список всех активных пользователей",
+    description="Возвращает пагинированный список всех активных пользователей. Доступ только для авторизованных.",
     response_description="Пагинированный список пользователей",
+    responses={
+        **get_auth_responses(401, 403, 404, 422),
+    },
+    openapi_extra={"security": [{"bearerAuth": []}, {"cookieAuth": []}]}
 )
 def get_users(
     pagination: PaginationParams = Depends(),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)  # Защищённый эндпоинт
+    current_user: User = Depends(get_current_user)
 ):
     """
     Получение списка пользователей (пагинированный).
@@ -76,13 +74,17 @@ def get_users(
     "/{user_id}",
     response_model=UserResponse,
     summary="Получение пользователя по ID",
-    description="Возвращает данные пользователя по указанному ID",
+    description="Возвращает данные пользователя по указанному ID. Доступ только для авторизованных.",
     response_description="Данные пользователя",
+    responses={
+        **get_auth_responses(401, 403, 404),
+    },
+    openapi_extra={"security": [{"bearerAuth": []}, {"cookieAuth": []}]}
 )
 def get_user(
     user_id: UUID,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)  # Защищённый эндпоинт
+    current_user: User = Depends(get_current_user)
 ):
     """
     Получение пользователя по ID.
@@ -101,19 +103,21 @@ def get_user(
     summary="Полное обновление пользователя",
     description="Обновляет все поля пользователя (PUT). Пользователь может редактировать только свой профиль.",
     response_description="Данные обновленного пользователя",
-    openapi_extra={"security": [{"bearerAuth": []}]}
+    responses={
+        **get_auth_responses(401, 403, 404, 422),
+    },
+    openapi_extra={"security": [{"bearerAuth": []}, {"cookieAuth": []}]}
 )
 def update_user_full(
     user_id: UUID,
     user_data: UserUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)  # Защищённый эндпоинт
+    current_user: User = Depends(get_current_user)
 ):
     """
     Полное обновление пользователя (PUT).
     Доступ: Private (только владелец или админ)
     """
-    # Проверка владения - пользователь может редактировать только себя
     if current_user.id != user_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -133,19 +137,21 @@ def update_user_full(
     summary="Частичное обновление пользователя",
     description="Обновляет указанные поля пользователя (PATCH). Пользователь может редактировать только свой профиль.",
     response_description="Данные обновленного пользователя",
-    openapi_extra={"security": [{"bearerAuth": []}]}
+    responses={
+        **get_auth_responses(401, 403, 404, 422),
+    },
+    openapi_extra={"security": [{"bearerAuth": []}, {"cookieAuth": []}]}
 )
 def update_user_partial(
     user_id: UUID,
     user_data: UserUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)  # Защищённый эндпоинт
+    current_user: User = Depends(get_current_user)
 ):
     """
     Частичное обновление пользователя (PATCH).
     Доступ: Private (только владелец или админ)
     """
-    # Проверка владения
     if current_user.id != user_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -164,18 +170,20 @@ def update_user_partial(
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Удаление пользователя (Soft Delete)",
     description="Помечает пользователя как удаленного (Soft Delete). Пользователь может удалить только свой профиль.",
-    openapi_extra={"security": [{"bearerAuth": []}]}
+    responses={
+        **get_auth_responses(401, 403, 404),
+    },
+    openapi_extra={"security": [{"bearerAuth": []}, {"cookieAuth": []}]}
 )
 def delete_user(
     user_id: UUID,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)  # Защищённый эндпоинт
+    current_user: User = Depends(get_current_user)
 ):
     """
     Удаление пользователя (Soft Delete).
     Доступ: Private (только владелец)
     """
-    # Проверка владения
     if current_user.id != user_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
