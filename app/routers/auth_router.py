@@ -263,8 +263,17 @@ async def oauth_init(provider: str):
         **get_auth_responses(400),
     }
 )
-async def oauth_callback(provider: str, code: str, state: str, response: Response, request: Request, db: Session = Depends(get_db)):
+async def oauth_callback(
+    provider: str,
+    code: Optional[str] = None,
+    state: Optional[str] = None,
+    response: Response = None,
+    request: Request = None,
+    db: Session = Depends(get_db)
+):
     provider_name = provider.lower()
+    if not code or not state:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Отсутствуют обязательные параметры code и state")
     if state not in oauth_states or oauth_states[state] != provider_name:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Неверный state")
     del oauth_states[state]
