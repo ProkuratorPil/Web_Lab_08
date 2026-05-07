@@ -4,6 +4,7 @@ from sqlalchemy import select, func
 from uuid import UUID
 from datetime import datetime
 from typing import Optional, Tuple
+from fastapi import HTTPException, status
 from app.models.user import User
 from app.schemas.user import UserCreate, UserUpdate, UserResponse, PaginationParams
 from app.core.cache import cache_service
@@ -17,6 +18,27 @@ class UserService:
         self.db = db
 
     def create(self, data: UserCreate) -> UserResponse:
+        # Проверка уникальности username и email
+        existing = self.db.query(User).filter(
+            User.username == data.username,
+            User.deleted_at.is_(None)
+        ).first()
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Пользователь с таким username уже существует"
+            )
+
+        existing = self.db.query(User).filter(
+            User.email == data.email,
+            User.deleted_at.is_(None)
+        ).first()
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Пользователь с таким email уже существует"
+            )
+
         hashed_password = self.hash_password(data.password)
         user_dict = data.model_dump()
         user_dict['hashed_password'] = hashed_password

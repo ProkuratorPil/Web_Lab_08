@@ -73,9 +73,23 @@ services:
     networks:
       - wp_labs_network
 
+  redisinsight:
+    image: redis/redisinsight:latest
+    container_name: wp_labs_redisinsight
+    restart: unless-stopped
+    ports:
+      - "5540:5540"
+    volumes:
+      - wp_labs_redisinsight:/data
+    networks:
+      - wp_labs_network
+    depends_on:
+      - redis
+
 volumes:
   wp_labs_postgres:
   wp_labs_redis:
+  wp_labs_redisinsight:
 
 networks:
   wp_labs_network:
