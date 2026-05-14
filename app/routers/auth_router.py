@@ -1,11 +1,15 @@
 """
 Async router for authentication and authorization with MongoDB.
 """
+import logging
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status, Response, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from typing import Optional
 import secrets
+import uuid
+
+logger = logging.getLogger(__name__)
 
 from app.core.config import settings
 from app.core.jwt import create_tokens, jwt_manager, verify_refresh
@@ -18,6 +22,8 @@ from app.core.dependencies import (
 )
 from app.core.cache import cache_service
 from app.core.oauth.providers import OAuthProviderFactory, get_oauth_user_info
+from app.common.queue.rabbitmq_service import rabbitmq_service
+from app.services.email_service import email_service
 from app.schemas.auth import (
     UserRegister,
     UserLogin,
@@ -93,6 +99,38 @@ def _invalidate_user_session_cache(user_id):
     cache_service.delete(f"wp:users:profile:{user_id}")
 
 
+async def _publish_user_registered_event(user_id: str, email: str, display_name: str) -> None:
+    """
+    Публикует событие регистрации пользователя в RabbitMQ.
+    Выполняется асинхронно, ошибки не прерывают регистрацию.
+    """
+    try:
+        event_payload = {
+            "eventId": str(uuid.uuid4()),
+            "eventType": "user.registered",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "payload": {
+                "userId": str(user_id),
+                "email": email,
+                "displayName": display_name,
+            },
+            "metadata": {
+                "attempt": 1,
+                "sourceService": "auth-service",
+            },
+        }
+
+        await rabbitmq_service.publish(
+            exchange="app.events",
+            routing_key="user.registered",
+            payload=event_payload,
+            persistent=True,
+        )
+        logger.info(f"User registered event published for user {user_id}")
+    except Exception as e:
+        logger.warning(f"Failed to publish user registered event: {e}")
+
+
 @router.post(
     "/register",
     response_model=UserResponse,
@@ -125,6 +163,14 @@ async def register(user_data: UserRegister):
     )
 
     await user.insert()
+
+    # Публикация события регистрации в RabbitMQ для асинхронной отправки email
+    display_name = user_data.email.split("@")[0]  # Fallback display name
+    await _publish_user_registered_event(
+        user_id=str(user.id),
+        email=user.email,
+        display_name=display_name,
+    )
 
     return UserResponse(
         id=user.id, username=user.username, email=user.email, phone=user.phone,

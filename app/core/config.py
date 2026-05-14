@@ -33,6 +33,23 @@ class Settings(BaseSettings):
     VK_CLIENT_SECRET: str = "your_vk_client_secret_here"
     VK_CALLBACK_URL: str = "http://localhost:8000/auth/oauth/vk/callback"
 
+    # RabbitMQ
+    RABBITMQ_HOST: str = "localhost"
+    RABBITMQ_PORT: int = 5672
+    RABBITMQ_USER: str = "student"
+    RABBITMQ_PASS: str = "student_secure_rabbit_pass_change_in_prod"
+
+    # Queue names (точечная нотация)
+    QUEUE_USER_REGISTERED: str = "wp.auth.user.registered"
+
+    # SMTP
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 465
+    SMTP_USER: str = ""
+    SMTP_PASS: str = ""
+    SMTP_FROM: str = ""
+    SMTP_SECURE: bool = True
+
     # MinIO
     MINIO_ENDPOINT: str = "minio:9000"
     MINIO_ACCESS_KEY: str = "minio_admin"

@@ -38,20 +38,58 @@ import asyncio
 from contextlib import asynccontextmanager
 
 
+from app.common.queue import start_consumer, stop_consumer
+from app.services.email_service import email_service
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Управление жизненным циклом приложения."""
     logger.info("Starting application...")
+
+    # 1. Инициализация БД
     await init_db()
-    # Initialize MinIO
+
+    # 2. Инициализация MinIO
     try:
         await minio_service.initialize()
         logger.info("MinIO initialized successfully")
     except Exception as e:
         logger.error(f"Failed to initialize MinIO: {e}")
         raise
+
+    # 3. Настройка SMTP
+    try:
+        email_service.configure(
+            host=settings.SMTP_HOST,
+            port=settings.SMTP_PORT,
+            user=settings.SMTP_USER,
+            password=settings.SMTP_PASS,
+            from_addr=settings.SMTP_FROM,
+            secure=settings.SMTP_SECURE,
+        )
+        email_service.validate_config()
+        logger.info("SMTP service configured successfully")
+    except Exception as e:
+        logger.error(f"Failed to configure SMTP: {e}")
+        # В development режиме приложение может продолжать работу без SMTP
+        if settings.NODE_ENV == "production":
+            raise
+
+    # 4. Инициализация RabbitMQ и запуск consumer
+    try:
+        await start_consumer()
+        logger.info("RabbitMQ consumer started successfully")
+    except Exception as e:
+        logger.error(f"Failed to start RabbitMQ consumer: {e}")
+        # В development режиме продолжаем работу
+        if settings.NODE_ENV == "production":
+            raise
+
     yield
+
     logger.info("Shutting down application...")
+    await stop_consumer()
     await close_db()
 
 
